@@ -34,3 +34,4 @@
 
 # Build dir
 **/build
+**/.cache
