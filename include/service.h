@@ -10,8 +10,6 @@
 
 #define UP std::unique_ptr
 
-struct SServiceCommand;
-
 struct SRawPacket
 {
     uint8_t data[ 256 ];
