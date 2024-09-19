@@ -19,6 +19,7 @@ project('fsatctl', 'cpp',
 
 sources = files(
     'src/main.cpp',
+    'src/service.cpp',
   )
 
 inc_dir = include_directories('include')
