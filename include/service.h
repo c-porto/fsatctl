@@ -1,47 +1,46 @@
 #ifndef SERVICE_H_
 #define SERVICE_H_
 
-#include <cstdint>
-#include <functional>
+#include <include/arg_parser.h>
+
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#define UP std::unique_ptr
-
-struct SRawPacket
-{
-    uint8_t data[ 256 ];
-    size_t size;
+struct ServiceCommand {
+  std::string cmdName;
+  std::size_t nArgs;
 };
 
-using FormatCommandFN = std::function<
-    UP<SRawPacket>( std::vector<std::string> &, uint8_t )>;
+using cmdVec = std::vector<ServiceCommand>;
 
-struct SServiceCommand
-{
-    std::string request;
-    uint8_t rawCmd;
-    FormatCommandFN fn;
+class ServiceInterface {
+  static constexpr size_t bufSize_ = 1024U;
+
+ public:
+  ServiceInterface(std::string serviceName,
+                   const std::vector<ServiceCommand>& availCmds);
+  void sendCommand(std::vector<argPair>&& requestVec);
+
+ private:
+  std::string requestToService(const char* json);
+  std::string serviceName_;
+  std::string sockPath_;
+  const cmdVec& availCmds_;
+  char buffer_[bufSize_];
 };
 
-class CServiceInterface
-{
-  public:
-    CServiceInterface( std::string && serviceName );
-    void sendCommand( std::vector<std::string> && requestVec );
-
-  private:
-    std::string requestToService( SRawPacket * rawData );
-    SServiceCommand registerCommand( SServiceCommand cmd );
-    std::string m_szName;
-    std::string m_szSocketPath;
-    std::vector<SServiceCommand> m_vCommands;
+static cmdVec readSensorsCmds = {
+    {"track", 1U},
+    {"untrack", 1U},
+    {"register", 1U},
+    {"unregister", 1U},
+    {"set_measurement_period", 1U},
 };
 
-inline std::unordered_map<std::string, CServiceInterface> g_mSupportedServices = {
-    { "read-sensors", CServiceInterface { "read-sensors" } },
+inline std::unordered_map<std::string, ServiceInterface> g_SupportedServices = {
+    {"read-sensors", ServiceInterface{"read-sensors", readSensorsCmds}},
 };
 
 #endif

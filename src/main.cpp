@@ -1,75 +1,27 @@
-#include <iostream>
-#include <ostream>
-#include <string>
-#include <vector>
-
+#include <include/arg_parser.h>
 #include <include/service.h>
 
-const std::string_view
-    USAGE = R"#(usage: fsatctl <service> <command> [args...|--help])#";
+#include <cstdio>
+#include <format>
+#include <iostream>
+#include <vector>
 
-static std::vector<std::string> splitArgs( int argc, char ** argv )
-{
-    std::vector<std::string> result;
+int main(int argc, char** argv) {
+  std::vector<argPair> args = parseArgs(argc, argv);
 
-    for( auto i = 1; i < argc; ++i )
-        result.push_back( std::string( argv[ i ] ) );
+  sortArgs(args);
 
-    return result;
-}
+  auto service{g_SupportedServices.find(args[0].second)};
 
-int main( int argc, char ** argv )
-{
-    std::vector<std::string> request;
+  if (service == g_SupportedServices.end()) {
+    std::cerr << "Unsupported service!!\n";
+    exit(1);
+  }
 
-    if( argc < 2 )
-    {
-        std::cout << USAGE << std::endl;
-        return 1;
-    }
+  std::cout << std::format("Sending command to {} service...\n",
+                           service->first);
 
-    const auto args = splitArgs( argc, argv );
+  service->second.sendCommand(std::move(args));
 
-    for( size_t i = 0; i < args.size(); ++i )
-    {
-        if( args[ i ] == "--help" || args[ i ] == "-h" )
-        {
-            std::cout << USAGE << std::endl;
-            return 1;
-        }
-
-        if( request.size() > 0 )
-        {
-            request.emplace_back( args[ i ] );
-        }
-
-        auto it { g_mSupportedServices.find( args[ i ] ) };
-
-        if( it != g_mSupportedServices.end() )
-        {
-            request.emplace_back( args[ i ] );
-        }
-    }
-
-    size_t request_args = request.size();
-
-    if( request_args == 0 )
-    {
-        std::cerr << "Invalid Service!!!" << std::endl;
-        return 1;
-    }
-
-    if( request_args < 2 )
-    {
-        std::cerr << "Not enough arguments were provided!!" << std::endl;
-        return 1;
-    }
-
-    auto service { g_mSupportedServices.find( request[ 0 ] ) };
-
-    std::cout << "Sending command to " << service->first << std::endl;
-
-    service->second.sendCommand( std::move( request ) );
-
-    return 0;
+  return 0;
 }

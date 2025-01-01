@@ -1,147 +1,138 @@
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <memory>
-#include <ostream>
-#include <string>
+#include <fcntl.h>
+#include <include/arg_parser.h>
+#include <include/service.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/un.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <format>
+#include <iostream>
+#include <nlohmann/detail/macro_scope.hpp>
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+#include <string>
 #include <utility>
 #include <vector>
 
-#include <include/read-sensors.h>
-#include <include/service.h>
+#define MAX_RQ_LEN (1024U)
 
-static UP<SRawPacket> readSensorsCommandFN(
-    std::vector<std::string> & requestVec,
-    uint8_t rawCmd )
-{
-    auto pkt = std::make_unique<SRawPacket>();
+namespace fs = std::filesystem;
+using json = nlohmann::json;
 
-    if( requestVec.size() < 3 )
-    {
-        std::cerr << "Invalid number of arguments for Read Sensors Service!!"
-                  << std::endl;
-        exit( 1 );
-    }
+struct command_json {
+  std::string service;
+  std::string command;
+  std::string args;
+};
 
-    if( requestVec[ 2 ].size() > 254U )
-    {
-        std::cerr << "Argument provided exceeded maximum length!!" << std::endl;
-        exit( 1 );
-    }
+/* Defining JSON Serialization */
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(command_json, service, command,
+                                                args)
 
-    pkt->data[ 0 ] = rawCmd;
-    pkt->data[ 1 ] = requestVec[ 2 ].size();
-    std::memcpy( &pkt->data[ 2 ], requestVec[ 2 ].c_str(), pkt->data[ 1 ] );
-    pkt->size = pkt->data[ 1 ] + 2U;
-
-    return pkt;
+ServiceInterface::ServiceInterface(std::string serviceName,
+                                   const std::vector<ServiceCommand> &availCmds)
+    : serviceName_{serviceName}, availCmds_{availCmds} {
+  sockPath_ = std::format("/run/{}/{}.sock", serviceName, serviceName);
 }
 
-CServiceInterface::CServiceInterface( std::string && serviceName )
-{
-    std::string service = std::move( serviceName );
+void ServiceInterface::sendCommand(std::vector<argPair> &&requestVec) {
+  std::vector<argPair> args = std::move(requestVec);
+  command_json cmd;
 
-    if( service == "read-sensors" )
-    {
-        m_szName = service;
-        m_szSocketPath = READ_SENSORS_SOCK_PATH;
+  for (const auto &arg : args) {
+    switch (arg.first) {
+      case 's':
+        cmd.service = arg.second;
+        break;
+      case 'c':
+        cmd.command = arg.second;
+        break;
+      case 'a':
+        cmd.args = arg.second;
+        break;
+      default:
+        std::cerr << std::format(
+            "Error generating request structure -> ArgType: {}\n", arg.first);
+        exit(1);
+    }
+  }
 
-        registerCommand( SServiceCommand { "register",
-                                           CMD_REGISTER_SENSOR,
-                                           readSensorsCommandFN } );
-        registerCommand( SServiceCommand { "unregister",
-                                           CMD_UNREGISTER_SENSOR,
-                                           readSensorsCommandFN } );
-        registerCommand( SServiceCommand { "track",
-                                           CMD_TRACK_SENSOR,
-                                           readSensorsCommandFN } );
-        registerCommand( SServiceCommand { "untrack",
-                                           CMD_UNTRACK_SENSOR,
-                                           readSensorsCommandFN } );
-        registerCommand( SServiceCommand { "set-measurement-period",
-                                           CMD_SET_MEASUREMENT_PERIOD,
-                                           readSensorsCommandFN } );
-    }
-    else
-    {
-        std::cerr << "Unsupported service!!" << std::endl;
-    }
+  json jsonObj;
+
+  to_json(jsonObj, cmd);
+
+  std::string jsonStr = nlohmann::to_string(jsonObj);
+
+  if (g_ArgConf.verbose)
+    std::cout << std::format("[Verbose] Raw request to be sent: {}\n", jsonStr);
+
+  auto res = requestToService(jsonStr.c_str());
+
+  std::cout << res;
 }
 
-void CServiceInterface::sendCommand( std::vector<std::string> && requestVec )
-{
-    std::vector<std::string> rq = std::move( requestVec );
-    UP<SRawPacket> pkt = nullptr;
-    std::string result = "";
+std::string ServiceInterface::requestToService(const char *json) {
+  int sockFd = socket(AF_UNIX, SOCK_STREAM, 0);
+  ssize_t rqSize = std::strlen(json);
+  ssize_t resSize;
 
-    for( const auto & cmd: m_vCommands )
-    {
-        if( cmd.request == rq[ 1 ] )
-        {
-            pkt = cmd.fn( rq, cmd.rawCmd );
-        }
-    }
+  rqSize = (rqSize > MAX_RQ_LEN) ? MAX_RQ_LEN : rqSize;
 
-    if( !pkt )
-    {
-        std::cerr << "Invalid Command!!" << std::endl;
-        exit( 1 );
-    }
+  if (sockFd < 0) {
+    std::cerr << "Could not get Service Socket fd!!\n";
+    goto cleanup_error;
+  }
 
-    result = this->requestToService( pkt.get() );
+  if (!fs::exists(sockPath_)) {
+    std::cerr << "Service socket file does not exist!\n";
+    goto cleanup_error;
+  }
 
-    std::cout << "Socket response: " << result << std::endl;
-}
+  sockaddr_un addr;
+  addr.sun_family = AF_UNIX;
+  std::strncpy(addr.sun_path, sockPath_.c_str(), sizeof(addr.sun_path) - 1);
 
-std::string CServiceInterface::requestToService( SRawPacket * rawData )
-{
-    int sockFd = socket( AF_UNIX, SOCK_DGRAM, 0 );
+  if (connect(sockFd, (struct sockaddr *)&addr, sizeof(struct sockaddr_un)) <
+      0) {
+    std::cerr << "Failed to connect to service socket!\n";
+    goto cleanup_error;
+  }
 
-    if( sockFd == -1 )
-    {
-        std::cerr << "Could not get Service Socket fd!!" << std::endl;
-        exit( 1 );
-    }
+  if (send(sockFd, json, rqSize, 0U) != rqSize) {
+    std::cerr << "Failed to send request to service socket!\n";
+    goto cleanup_error;
+  }
 
-    sockaddr_un addr {};
-    addr.sun_family = AF_UNIX;
-    std::strncpy( addr.sun_path,
-                  m_szSocketPath.c_str(),
-                  sizeof( addr.sun_path ) - 1 );
+  /* Setup response timeout */
+  struct timeval timeout;
+  timeout.tv_sec = 0;
+  timeout.tv_usec = 250000;
+  if (setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) <
+      0) {
+    std::cerr << "Failed to set socket response timeout\n";
+    goto cleanup_error;
+  }
 
-    ssize_t bytes_sent = sendto( sockFd,
-                                 rawData->data,
-                                 rawData->size,
-                                 0,
-                                 reinterpret_cast<sockaddr *>( &addr ),
-                                 sizeof( addr ) );
+  resSize = recv(sockFd, buffer_, bufSize_ - 1, 0);
 
-    if( bytes_sent < 0 )
-    {
-        std::cerr << "Error writing to Service Socket!!" << std::endl;
-        perror( "Errno: " );
-        exit( 1 );
-    }
+  if (resSize < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    std::cout << "Response from service timedout!\n";
+    exit(0);
+  }
 
-    if( static_cast<size_t>( bytes_sent ) < rawData->size )
-    {
-        std::cerr << "Could not write the full packet to Service Socket"
-                  << std::endl;
-        exit( 1 );
-    }
+  buffer_[resSize] = '\0';
 
-    close( sockFd );
+  return std::format("Response from Service: {}\n",
+                     const_cast<const char *>(buffer_));
 
-    return "Services do not support socket response yet :(";
-}
-
-SServiceCommand CServiceInterface::registerCommand( SServiceCommand cmd )
-{
-    return m_vCommands.emplace_back( cmd );
+cleanup_error:
+  close(sockFd);
+  std::cerr << "Failed to complete request! Exiting...\n";
+  exit(1);
 }
