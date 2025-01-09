@@ -63,9 +63,7 @@ void ServiceInterface::sendCommand(std::vector<argPair> &&requestVec) {
     }
   }
 
-  json jsonObj;
-
-  to_json(jsonObj, cmd);
+  json jsonObj = cmd;
 
   std::string jsonStr = nlohmann::to_string(jsonObj);
 
