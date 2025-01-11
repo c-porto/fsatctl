@@ -39,8 +39,12 @@ static cmdVec readSensorsCmds = {
     {"set_measurement_period", 1U},
 };
 
+static cmdVec ss = {
+};
+
 inline std::unordered_map<std::string, ServiceInterface> g_SupportedServices = {
     {"read-sensors", ServiceInterface{"read-sensors", readSensorsCmds}},
+    {"sservice", ServiceInterface{"sservice", ss}},
 };
 
 #endif

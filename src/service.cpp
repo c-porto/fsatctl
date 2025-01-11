@@ -11,7 +11,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <format>
 #include <iostream>
 #include <nlohmann/detail/macro_scope.hpp>
 #include <nlohmann/json.hpp>
@@ -38,7 +37,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(command_json, service, command,
 ServiceInterface::ServiceInterface(std::string serviceName,
                                    const std::vector<ServiceCommand> &availCmds)
     : serviceName_{serviceName}, availCmds_{availCmds} {
-  sockPath_ = std::format("/run/{}/{}.sock", serviceName, serviceName);
+  sockPath_ = "/run/" + serviceName + "/" + serviceName + ".sock";
 }
 
 void ServiceInterface::sendCommand(std::vector<argPair> &&requestVec) {
@@ -57,8 +56,8 @@ void ServiceInterface::sendCommand(std::vector<argPair> &&requestVec) {
         cmd.args = arg.second;
         break;
       default:
-        std::cerr << std::format(
-            "Error generating request structure -> ArgType: {}\n", arg.first);
+        std::cerr << "Error generating request structure -> ArgType: "
+                  << arg.first << '\n';
         exit(1);
     }
   }
@@ -68,7 +67,7 @@ void ServiceInterface::sendCommand(std::vector<argPair> &&requestVec) {
   std::string jsonStr = nlohmann::to_string(jsonObj);
 
   if (g_ArgConf.verbose)
-    std::cout << std::format("[Verbose] Raw request to be sent: {}\n", jsonStr);
+    std::cout << "[Verbose] Raw request to be sent: " << jsonStr << '\n';
 
   auto res = requestToService(jsonStr.c_str());
 
@@ -126,8 +125,7 @@ std::string ServiceInterface::requestToService(const char *json) {
 
   buffer_[resSize] = '\0';
 
-  return std::format("Response from Service: {}\n",
-                     const_cast<const char *>(buffer_));
+  return std::string{"Response from Service: " + std::string{buffer_} + '\n'};
 
 cleanup_error:
   close(sockFd);

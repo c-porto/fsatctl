@@ -2,7 +2,6 @@
 #include <include/service.h>
 
 #include <cstdio>
-#include <format>
 #include <iostream>
 #include <vector>
 
@@ -18,8 +17,7 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  std::cout << std::format("Sending command to {} service...\n",
-                           service->first);
+  std::cout << "Sending command to " << service->first << "service...\n";
 
   service->second.sendCommand(std::move(args));
 
