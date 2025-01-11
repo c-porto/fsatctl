@@ -17,7 +17,7 @@ int main(int argc, char** argv) {
     exit(1);
   }
 
-  std::cout << "Sending command to " << service->first << "service...\n";
+  std::cout << "Sending command to " << service->first << " service...\n";
 
   service->second.sendCommand(std::move(args));
 
