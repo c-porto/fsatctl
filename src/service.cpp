@@ -125,6 +125,8 @@ std::string ServiceInterface::requestToService(const char *json) {
 
   buffer_[resSize] = '\0';
 
+  close(sockFd);
+
   return std::string{"Response from Service: " + std::string{buffer_} + '\n'};
 
 cleanup_error:
